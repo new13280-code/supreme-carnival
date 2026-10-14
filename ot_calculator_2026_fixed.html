@@ -1,0 +1,1776 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ปฏิทินคำนวณ OT ปี 2026 (รองรับมือถือ)</title>
+    
+    <!-- External Libraries & Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Prompt', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            background-color: #f8fafc;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+        .pulse-warning {
+            animation: pulse-glow 2s infinite;
+        }
+        @media print {
+            @page {
+                size: A4 portrait;
+                margin: 12mm;
+            }
+
+            body {
+                background: #fff !important;
+                color: #000 !important;
+            }
+
+            body * {
+                visibility: hidden !important;
+            }
+
+            #ot-print-slip,
+            #ot-print-slip * {
+                visibility: visible !important;
+            }
+
+            #ot-print-slip {
+                display: block !important;
+                position: absolute !important;
+                inset: 0 auto auto 0 !important;
+                width: 100% !important;
+                max-width: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: visible !important;
+                box-shadow: none !important;
+                border: none !important;
+            }
+
+            .no-print {
+                display: none !important;
+            }
+
+            table {
+                width: 100% !important;
+                border-collapse: collapse !important;
+            }
+
+            tr {
+                break-inside: avoid;
+            }
+        }
+    </style>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'ot-calculator-2026';
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            }
+        } catch (e) {
+            console.warn("Firebase config error:", e);
+        }
+
+        window.OTStorage = {
+            isAvailable: () => Boolean(auth && db),
+
+            init: async (onUserReady) => {
+                if (!auth || !db) return () => {};
+                try {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                } catch (err) {
+                    try {
+                        await signInAnonymously(auth);
+                    } catch (e) {
+                        console.warn("Firebase sign-in unavailable; using local storage.", e);
+                    }
+                }
+
+                // Return an explicit cleanup function so React can unsubscribe correctly.
+                return onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUser = user;
+                        onUserReady(user);
+                    }
+                });
+            },
+
+            subscribeData: (onData) => {
+                if (!db || !currentUser) return () => {};
+                const userDocRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'ot_data', 'user_profile');
+                return onSnapshot(userDocRef, (docSnap) => {
+                    // Notify even when the cloud document does not exist, so loading can finish.
+                    onData(docSnap.exists() ? docSnap.data() : null);
+                }, (error) => {
+                    console.error("Firestore sync error:", error);
+                    onData(null);
+                });
+            },
+
+            saveData: async (data) => {
+                if (!db || !currentUser) return false;
+                try {
+                    const userDocRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'ot_data', 'user_profile');
+                    await setDoc(userDocRef, data, { merge: true });
+                    return true;
+                } catch (error) {
+                    console.error("Firestore save error:", error);
+                    return false;
+                }
+            }
+        };
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const THAI_HOLIDAYS_2026 = {
+            '2026-01-01': 'วันขึ้นปีใหม่',
+            '2026-03-03': 'วันมาฆบูชา',
+            '2026-04-06': 'วันจักรี',
+            '2026-04-13': 'วันสงกรานต์',
+            '2026-04-14': 'วันสงกรานต์',
+            '2026-04-15': 'วันสงกรานต์',
+            '2026-05-01': 'วันแรงงานแห่งชาติ',
+            '2026-05-04': 'วันฉัตรมงคล',
+            '2026-05-31': 'วันวิสาขบูชา',
+            '2026-06-01': 'ชดเชยวันวิสาขบูชา',
+            '2026-06-03': 'วันเฉลิมพระชนมพรรษา สมเด็จพระนางเจ้าฯ พระบรมราชินี',
+            '2026-07-28': 'วันเฉลิมพระชนมพรรษา พระบาทสมเด็จพระเจ้าอยู่หัว',
+            '2026-07-29': 'วันอาสาฬหบูชา',
+            '2026-08-12': 'วันแม่แห่งชาติ',
+            '2026-10-13': 'วันนวมินทรมหาราช',
+            '2026-10-23': 'วันปิยมหาราช',
+            '2026-12-05': 'วันพ่อแห่งชาติ / วันชาติ',
+            '2026-12-10': 'วันรัฐธรรมนูญ',
+            '2026-12-31': 'วันสิ้นปี',
+            // เพิ่มตัวอย่างวันหยุดปี 2027 เพื่อเป็นค่าเริ่มต้นสำหรับปีถัดไป
+            '2027-01-01': 'วันขึ้นปีใหม่',
+            '2027-04-13': 'วันสงกรานต์',
+            '2027-04-14': 'วันสงกรานต์',
+            '2027-04-15': 'วันสงกรานต์',
+            '2027-05-01': 'วันแรงงานแห่งชาติ',
+            '2027-07-28': 'วันเฉลิมพระชนมพรรษา พระบาทสมเด็จพระเจ้าอยู่หัว',
+            '2027-08-12': 'วันแม่แห่งชาติ',
+            '2027-10-13': 'วันนวมินทรมหาราช',
+            '2027-10-23': 'วันปิยมหาราช',
+            '2027-12-05': 'วันพ่อแห่งชาติ / วันชาติ',
+            '2027-12-10': 'วันรัฐธรรมนูญ',
+            '2027-12-31': 'วันสิ้นปี'
+        };
+
+        const MONTH_NAMES_TH = [
+            'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+            'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+        ];
+
+        const DAY_NAMES_TH = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+
+        const DEFAULT_SETTINGS = {
+            baseDailyHours: 9,
+            daysInMonth: 30,
+            otWarningThreshold: 80,
+            enableOtWarning: true,
+            cycleStartDay: 25,
+            cycleEndDay: 24,
+            preset1: 9,
+            preset2: 10.5,
+            preset3: 11.5
+        };
+
+        const OT_LOCAL_STORAGE_KEY = 'ot-calculator-2026-data';
+
+        function OTCalculatorApp() {
+            const [salary, setSalary] = React.useState(23400);
+            const [selectedYear, setSelectedYear] = React.useState(2026);
+            const [selectedCycleMonth, setSelectedCycleMonth] = React.useState(10);
+            const [workHours, setWorkHours] = React.useState({});
+            const [customHolidays, setCustomHolidays] = React.useState(THAI_HOLIDAYS_2026);
+            const [settings, setSettings] = React.useState(DEFAULT_SETTINGS);
+            
+            // Persistence & Sync States
+            const [isLoaded, setIsLoaded] = React.useState(false);
+            const [saveStatus, setSaveStatus] = React.useState('ready');
+            const [isCloudEnabled, setIsCloudEnabled] = React.useState(false);
+            const [isCloudReady, setIsCloudReady] = React.useState(false);
+
+            // UI View & Modal States
+            const [viewMode, setViewMode] = React.useState(() => {
+                return window.innerWidth < 768 ? 'mobile-cards' : 'calendar';
+            });
+            const [showHolidayModal, setShowHolidayModal] = React.useState(false);
+            const [showSettingsModal, setShowSettingsModal] = React.useState(false);
+            const [show80HourWarningModal, setShow80HourWarningModal] = React.useState(false);
+            const [showPrintSlipModal, setShowPrintSlipModal] = React.useState(false);
+            const [hasTriggered80HrModal, setHasTriggered80HrModal] = React.useState(false);
+            const [toastMessage, setToastMessage] = React.useState('');
+
+            React.useEffect(() => {
+                let cancelled = false;
+                let unsubscribeAuth = () => {};
+                let unsubscribeData = () => {};
+
+                // Restore local data first, so the app remains usable without Firebase.
+                try {
+                    const raw = window.localStorage.getItem(OT_LOCAL_STORAGE_KEY);
+                    if (raw) {
+                        const data = JSON.parse(raw);
+                        if (data && typeof data === 'object') {
+                            if (data.salary !== undefined) setSalary(data.salary);
+                            if (data.selectedYear !== undefined) setSelectedYear(data.selectedYear);
+                            if (data.selectedCycleMonth !== undefined) setSelectedCycleMonth(data.selectedCycleMonth);
+                            if (data.workHours && typeof data.workHours === 'object') setWorkHours(data.workHours);
+                            if (data.customHolidays && typeof data.customHolidays === 'object') setCustomHolidays(data.customHolidays);
+                            if (data.settings && typeof data.settings === 'object') setSettings(prev => ({ ...prev, ...data.settings }));
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Could not restore local OT data:', error);
+                }
+
+                if (!window.OTStorage || !window.OTStorage.isAvailable()) {
+                    setIsLoaded(true);
+                    setSaveStatus('local');
+                } else {
+                    Promise.resolve(window.OTStorage.init(() => {
+                        if (cancelled) return;
+                        setIsCloudEnabled(true);
+                        unsubscribeData = window.OTStorage.subscribeData((data) => {
+                            if (cancelled) return;
+                            if (data) {
+                                if (data.salary !== undefined) setSalary(data.salary);
+                                if (data.selectedYear !== undefined) setSelectedYear(data.selectedYear);
+                                if (data.selectedCycleMonth !== undefined) setSelectedCycleMonth(data.selectedCycleMonth);
+                                if (data.workHours && typeof data.workHours === 'object') setWorkHours(data.workHours);
+                                if (data.customHolidays && typeof data.customHolidays === 'object') setCustomHolidays(data.customHolidays);
+                                if (data.settings && typeof data.settings === 'object') setSettings(prev => ({ ...prev, ...data.settings }));
+                            }
+                            setIsCloudReady(true);
+                            setIsLoaded(true);
+                            setSaveStatus(data ? 'saved' : 'local');
+                        });
+                    })).then((stop) => {
+                        unsubscribeAuth = typeof stop === 'function' ? stop : () => {};
+                        if (cancelled) unsubscribeAuth();
+                    }).catch((error) => {
+                        console.warn('Firebase initialization failed; using local storage.', error);
+                        if (!cancelled) {
+                            setIsLoaded(true);
+                            setSaveStatus('local');
+                        }
+                    });
+                }
+
+                return () => {
+                    cancelled = true;
+                    unsubscribeData();
+                    unsubscribeAuth();
+                };
+            }, []);
+
+            // Always save locally; cloud sync is an optional second copy.
+            React.useEffect(() => {
+                if (!isLoaded) return;
+                const data = {
+                    salary,
+                    selectedYear,
+                    selectedCycleMonth,
+                    workHours,
+                    customHolidays,
+                    settings,
+                    updatedAt: new Date().toISOString()
+                };
+                try {
+                    window.localStorage.setItem(OT_LOCAL_STORAGE_KEY, JSON.stringify(data));
+                    if (!isCloudEnabled) setSaveStatus('local');
+                } catch (error) {
+                    console.error('Local OT save failed:', error);
+                    setSaveStatus('error');
+                }
+            }, [salary, selectedYear, selectedCycleMonth, workHours, customHolidays, settings, isLoaded, isCloudEnabled]);
+
+            React.useEffect(() => {
+                if (!isLoaded || !isCloudEnabled || !isCloudReady) return;
+
+                setSaveStatus('saving');
+                const timer = setTimeout(async () => {
+                    const success = await window.OTStorage.saveData({
+                        salary,
+                        selectedYear,
+                        selectedCycleMonth,
+                        workHours,
+                        customHolidays,
+                        settings,
+                        updatedAt: new Date().toISOString()
+                    });
+                    setSaveStatus(success ? 'saved' : 'local');
+                }, 600);
+
+                return () => clearTimeout(timer);
+            }, [salary, selectedYear, selectedCycleMonth, workHours, customHolidays, settings, isLoaded, isCloudEnabled, isCloudReady]);
+
+            const hourlyRate = React.useMemo(() => {
+                const s = Number(salary);
+                const days = Number(settings.daysInMonth);
+                const hrs = Number(settings.baseDailyHours);
+
+                if (
+                    !Number.isFinite(s) || s < 0 ||
+                    !Number.isFinite(days) || days <= 0 ||
+                    !Number.isFinite(hrs) || hrs <= 0
+                ) {
+                    return 0;
+                }
+
+                return s / days / hrs;
+            }, [salary, settings.daysInMonth, settings.baseDailyHours]);
+
+            const cycleDates = React.useMemo(() => {
+                const dates = [];
+
+                const toValidDay = (value, fallback) => {
+                    const n = Number(value);
+                    return Number.isFinite(n)
+                        ? Math.max(1, Math.min(31, Math.trunc(n)))
+                        : fallback;
+                };
+
+                const startDay = toValidDay(settings.cycleStartDay, 25);
+                const endDay = toValidDay(settings.cycleEndDay, 24);
+
+                // selectedCycleMonth เป็น 1–12
+                const endMonthIndex = selectedCycleMonth - 1;
+                const startMonthDate = new Date(
+                    selectedYear,
+                    endMonthIndex - 1,
+                    1
+                );
+
+                const endMonthDate = new Date(
+                    selectedYear,
+                    endMonthIndex,
+                    1
+                );
+
+                // จำกัดวันที่ให้ไม่เกินวันสุดท้ายของเดือนนั้น
+                const makeClampedDate = (year, monthIndex, day) => {
+                    const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+                    return new Date(year, monthIndex, Math.min(day, lastDay));
+                };
+
+                const startDate = makeClampedDate(
+                    startMonthDate.getFullYear(),
+                    startMonthDate.getMonth(),
+                    startDay
+                );
+
+                const endDate = makeClampedDate(
+                    endMonthDate.getFullYear(),
+                    endMonthDate.getMonth(),
+                    endDay
+                );
+
+                // ป้องกันการสร้างรอบที่ไม่ถูกต้อง
+                if (startDate > endDate) return dates;
+
+                const curr = new Date(startDate);
+
+                while (curr <= endDate) {
+                    const y = curr.getFullYear();
+                    const m = String(curr.getMonth() + 1).padStart(2, '0');
+                    const d = String(curr.getDate()).padStart(2, '0');
+                    const dateStr = `${y}-${m}-${d}`;
+                    const dayOfWeek = curr.getDay();
+                    const holidayName = customHolidays[dateStr] || null;
+
+                    let dayType = 'weekday';
+
+                    if (holidayName) {
+                        dayType = 'holiday';
+                    } else if (dayOfWeek === 0) {
+                        dayType = 'sunday';
+                    } else if (dayOfWeek === 6) {
+                        dayType = 'saturday';
+                    }
+
+                    dates.push({
+                        dateStr,
+                        dateObj: new Date(curr),
+                        dayNum: curr.getDate(),
+                        dayOfWeek,
+                        dayName: DAY_NAMES_TH[dayOfWeek],
+                        dayType,
+                        holidayName
+                    });
+
+                    curr.setDate(curr.getDate() + 1);
+                }
+
+                return dates;
+            }, [
+                selectedYear,
+                selectedCycleMonth,
+                customHolidays,
+                settings.cycleStartDay,
+                settings.cycleEndDay
+            ]);
+
+            const dailyCalculations = React.useMemo(() => {
+                let cumulativeOtSoFar = 0;
+                const baseHrs = parseFloat(settings.baseDailyHours) || 9;
+                const threshold = parseFloat(settings.otWarningThreshold) || 80;
+
+                return cycleDates.map(item => {
+                    const hrs = parseFloat(workHours[item.dateStr]) || 0;
+                    let ot1_0 = 0;
+                    let ot1_5 = 0;
+                    let ot2_0 = 0;
+                    let ot3_0 = 0;
+
+                    if (hrs > 0) {
+                        if (item.dayType === 'weekday') {
+                            if (hrs > baseHrs) {
+                                ot1_5 = hrs - baseHrs;
+                            }
+                        } else if (item.dayType === 'saturday' || item.dayType === 'sunday') {
+                            ot1_0 = Math.min(hrs, baseHrs);
+                            if (hrs > baseHrs) {
+                                ot3_0 = hrs - baseHrs;
+                            }
+                        } else if (item.dayType === 'holiday') {
+                            ot2_0 = Math.min(hrs, baseHrs);
+                            if (hrs > baseHrs) {
+                                ot3_0 = hrs - baseHrs;
+                            }
+                        }
+                    }
+
+                    const pay1_0 = ot1_0 * hourlyRate * 1.0;
+                    const pay1_5 = ot1_5 * hourlyRate * 1.5;
+                    const pay2_0 = ot2_0 * hourlyRate * 2.0;
+                    const pay3_0 = ot3_0 * hourlyRate * 3.0;
+                    const totalOtPay = pay1_0 + pay1_5 + pay2_0 + pay3_0;
+                    const totalOtHours = ot1_0 + ot1_5 + ot2_0 + ot3_0;
+
+                    const prevCumulativeOt = cumulativeOtSoFar;
+                    cumulativeOtSoFar += totalOtHours;
+
+                    const isExceeding80 = settings.enableOtWarning && (cumulativeOtSoFar > threshold);
+                    const isDayCausingExceed = settings.enableOtWarning && (prevCumulativeOt < threshold && cumulativeOtSoFar >= threshold);
+
+                    return {
+                        ...item,
+                        hrs,
+                        ot1_0,
+                        ot1_5,
+                        ot2_0,
+                        ot3_0,
+                        pay1_0,
+                        pay1_5,
+                        pay2_0,
+                        pay3_0,
+                        totalOtPay,
+                        totalOtHours,
+                        runningCumulativeOt: cumulativeOtSoFar,
+                        isExceeding80,
+                        isDayCausingExceed
+                    };
+                });
+            }, [cycleDates, workHours, hourlyRate, settings]);
+
+            const summary = React.useMemo(() => {
+                return dailyCalculations.reduce((acc, curr) => {
+                    acc.hrs1_0 += curr.ot1_0;
+                    acc.hrs1_5 += curr.ot1_5;
+                    acc.hrs2_0 += curr.ot2_0;
+                    acc.hrs3_0 += curr.ot3_0;
+
+                    acc.pay1_0 += curr.pay1_0;
+                    acc.pay1_5 += curr.pay1_5;
+                    acc.pay2_0 += curr.pay2_0;
+                    acc.pay3_0 += curr.pay3_0;
+
+                    acc.totalOtHours += curr.totalOtHours;
+                    acc.totalOtPay += curr.totalOtPay;
+                    return acc;
+                }, {
+                    hrs1_0: 0, hrs1_5: 0, hrs2_0: 0, hrs3_0: 0,
+                    pay1_0: 0, pay1_5: 0, pay2_0: 0, pay3_0: 0,
+                    totalOtHours: 0, totalOtPay: 0
+                });
+            }, [dailyCalculations]);
+
+            const thresholdLimit = parseFloat(settings.otWarningThreshold) || 80;
+
+            React.useEffect(() => {
+                if (settings.enableOtWarning && summary.totalOtHours > thresholdLimit) {
+                    if (!hasTriggered80HrModal) {
+                        setShow80HourWarningModal(true);
+                        setHasTriggered80HrModal(true);
+                    }
+                } else {
+                    if (hasTriggered80HrModal) {
+                        setHasTriggered80HrModal(false);
+                    }
+                }
+            }, [summary.totalOtHours, hasTriggered80HrModal, settings.enableOtWarning, thresholdLimit]);
+
+            const showNotification = (msg) => {
+                setToastMessage(msg);
+                setTimeout(() => setToastMessage(''), 3000);
+            };
+
+            const handleSetHours = (dateStr, val) => {
+                if (val === '') {
+                    setWorkHours(prev => ({
+                        ...prev,
+                        [dateStr]: ''
+                    }));
+                    return;
+                }
+
+                const parsed = Number(val);
+
+                if (!Number.isFinite(parsed)) return;
+
+                const next = Math.max(
+                    0,
+                    Math.min(24, Math.round(parsed * 2) / 2)
+                );
+
+                setWorkHours(prev => ({
+                    ...prev,
+                    [dateStr]: next
+                }));
+            };
+
+            const handleStepHours = (dateStr, delta) => {
+                setWorkHours(prev => {
+                    const current = Number(prev[dateStr]) || 0;
+                    const next = Math.max(
+                        0,
+                        Math.min(24, Math.round((current + delta) * 2) / 2)
+                    );
+
+                    return {
+                        ...prev,
+                        [dateStr]: next
+                    };
+                });
+            };
+
+            const fillDefaultWeekdays = (hours) => {
+                const updated = { ...workHours };
+                cycleDates.forEach(d => {
+                    if (d.dayType === 'weekday') {
+                        updated[d.dateStr] = hours;
+                    }
+                });
+                setWorkHours(updated);
+                showNotification(`กรอก ${hours} ชม. ในวันจันทร์-ศุกร์ เรียบร้อยแล้ว`);
+            };
+
+            const clearAllHours = () => {
+                setWorkHours({});
+                setHasTriggered80HrModal(false);
+                showNotification('ล้างข้อมูลการทำงานทั้งหมดแล้ว');
+            };
+
+            const toggleHolidayDate = (dateStr) => {
+                setCustomHolidays(prev => {
+                    const next = { ...prev };
+                    if (next[dateStr]) {
+                        delete next[dateStr];
+                    } else {
+                        next[dateStr] = 'วันหยุดพิเศษ/นักขัตฤกษ์';
+                    }
+                    return next;
+                });
+            };
+
+            const formatMoney = (amount) => {
+                return amount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            };
+
+            const formatHours = (hrs) => {
+                if (!hrs) return '0';
+                return Number.isInteger(hrs) ? hrs.toString() : hrs.toFixed(1);
+            };
+
+            const isTotalOtExceeded80 = settings.enableOtWarning && (summary.totalOtHours > thresholdLimit);
+
+            return (
+                <div className="max-w-7xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
+                    {/* Toast Notification */}
+                    {toastMessage && (
+                        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-xl text-xs sm:text-sm font-semibold border border-slate-700 animate-bounce flex items-center gap-2">
+                            <span>✅</span> {toastMessage}
+                        </div>
+                    )}
+
+                    {/* App Header */}
+                    <header className="mb-4 sm:mb-6 bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3 sm:gap-4 no-print">
+                        <div>
+                            <div className="flex items-center gap-2.5 sm:gap-3">
+                                <span className="bg-indigo-600 text-white p-2 sm:p-2.5 rounded-2xl text-xl sm:text-2xl shadow-sm shrink-0">📅</span>
+                                <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h1 className="text-lg sm:text-2xl font-bold text-slate-800 leading-tight">ปฏิทินคำนวณ OT ปี {selectedYear}</h1>
+                                        {isCloudEnabled && (
+                                            <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold transition ${
+                                                saveStatus === 'saving' 
+                                                    ? 'bg-amber-100 text-amber-800 animate-pulse border border-amber-200' 
+                                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                            }`}>
+                                                {saveStatus === 'saving' ? '⏳ กำลังบันทึก...' : saveStatus === 'error' ? '🔴 บันทึกในเครื่องไม่สำเร็จ' : saveStatus === 'local' ? '💾 บันทึกในเครื่องแล้ว' : '🟢 บันทึกอัตโนมัติแล้ว'}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+                                        ฐาน {settings.baseDailyHours} ชม./วัน • หาร {settings.daysInMonth} วัน • คำนวณเงิน OT และแจ้งเตือนเมื่อเกิน {thresholdLimit} ชั่วโมง
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap self-end md:self-auto w-full sm:w-auto justify-end">
+                            <button 
+                                onClick={() => setShowPrintSlipModal(true)}
+                                className="flex-1 sm:flex-none justify-center inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs sm:text-sm font-semibold rounded-xl border border-slate-300 transition active:scale-95"
+                                title="ดูใบบันทึก OT สำหรับพิมพ์"
+                            >
+                                <span>🖨️ สลิป OT</span>
+                            </button>
+                            <button 
+                                onClick={() => setShowHolidayModal(true)}
+                                className="flex-1 sm:flex-none justify-center inline-flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 text-xs sm:text-sm font-semibold rounded-xl border border-amber-200 transition active:scale-95"
+                            >
+                                <span>🟡 วันหยุด</span>
+                            </button>
+                            <button 
+                                onClick={() => setShowSettingsModal(true)}
+                                className="flex-1 sm:flex-none justify-center inline-flex items-center gap-1.5 px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 text-xs sm:text-sm font-semibold rounded-xl border border-indigo-200 transition active:scale-95"
+                            >
+                                <span>⚙️ ตั้งค่า</span>
+                            </button>
+                        </div>
+                    </header>
+
+                    {}
+                    <section className="bg-white rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-200 mb-4 sm:mb-6 no-print">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
+                            {/* Salary Input */}
+                            <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    💰 เงินเดือนประจำ (บาท)
+                                </label>
+                                <div className="relative rounded-xl shadow-sm">
+                                    <input 
+                                        type="number"
+                                        min="0"
+                                        value={salary}
+                                        onChange={(e) => setSalary(e.target.value)}
+                                        className="block w-full text-base sm:text-lg font-bold text-slate-800 pl-3.5 pr-12 py-2 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition"
+                                        placeholder="30000"
+                                    />
+                                    <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400 text-xs font-medium">
+                                        บาท
+                                    </div>
+                                </div>
+                                <div className="mt-1.5 text-xs text-slate-500 bg-slate-50 p-2 rounded-lg border border-slate-100 flex justify-between items-center">
+                                    <span>สูตร: เงินเดือน ÷ {settings.daysInMonth} ÷ {settings.baseDailyHours}</span>
+                                    <span className="font-bold text-indigo-700">
+                                        = {formatMoney(hourlyRate)} ฿/ชม.
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Cycle Select */}
+                            <div className="flex flex-col gap-2">
+                                <label className="block text-xs font-semibold text-slate-700 mb-0">
+                                    🗓️ เลือกรอบเดือนและปี
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <select 
+                                        value={selectedYear}
+                                        onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                                        className="block w-full text-xs sm:text-sm font-semibold text-slate-800 px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition"
+                                    >
+                                        {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => (
+                                            <option key={y} value={y}>{y} (พ.ศ. {y+543})</option>
+                                        ))}
+                                    </select>
+                                    <select 
+                                        value={selectedCycleMonth}
+                                        onChange={(e) => setSelectedCycleMonth(parseInt(e.target.value))}
+                                        className="block w-full text-xs sm:text-sm font-semibold text-slate-800 px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white outline-none transition"
+                                    >
+                                        {MONTH_NAMES_TH.map((m, idx) => {
+                                            const monthNum = idx + 1;
+                                            return (
+                                                <option key={monthNum} value={monthNum}>
+                                                    รอบเดือน {m}
+                                                </option>
+                                            );
+                                        })}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* Quick Fill Actions */}
+                            <div className="flex flex-col justify-between">
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                                    ⚡ กรอกชั่วโมงด่วนทั้งเดือน (จันทร์-ศุกร์)
+                                </label>
+                                <div className="grid grid-cols-4 gap-1 sm:gap-1.5">
+                                    <button 
+                                        onClick={() => fillDefaultWeekdays(settings.preset1)}
+                                        className="py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl border border-slate-200 transition text-center active:scale-95 px-1"
+                                    >
+                                        {settings.preset1} ชม.
+                                    </button>
+                                    <button 
+                                        onClick={() => fillDefaultWeekdays(settings.preset2)}
+                                        className="py-2 text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-xl border border-amber-200 transition text-center active:scale-95 px-1"
+                                    >
+                                        {settings.preset2} ชม.
+                                    </button>
+                                    <button 
+                                        onClick={() => fillDefaultWeekdays(settings.preset3)}
+                                        className="py-2 text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl border border-indigo-200 transition text-center active:scale-95 px-1"
+                                    >
+                                        {settings.preset3} ชม.
+                                    </button>
+                                    <button 
+                                        onClick={clearAllHours}
+                                        className="py-2 text-xs font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl border border-rose-200 transition text-center active:scale-95 px-1"
+                                    >
+                                        ล้างข้อมูล
+                                    </button>
+                                </div>
+                                <p className="mt-1 text-[11px] text-slate-400">
+                                    * จันทร์-ศุกร์ คิด OT เมื่อเกิน {settings.baseDailyHours} ชั่วโมง
+                                </p>
+                            </div>
+                        </div>
+                    </section>
+
+                    {}
+                    {isTotalOtExceeded80 && (
+                        <div className="mb-4 sm:mb-6 bg-gradient-to-r from-red-500 via-rose-600 to-orange-500 text-white rounded-2xl p-3.5 sm:p-4 shadow-lg border-2 border-rose-300 pulse-warning flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 no-print">
+                            <div className="flex items-center gap-3">
+                                <span className="text-2xl sm:text-3xl bg-white/20 p-2 rounded-xl shrink-0">⚠️</span>
+                                <div>
+                                    <div className="font-extrabold text-sm sm:text-base leading-tight">
+                                        คำเตือน: ยอดรวม OT สะสมเกินเกณฑ์ {thresholdLimit} ชั่วโมงแล้ว!
+                                    </div>
+                                    <div className="text-xs text-rose-100 mt-0.5">
+                                        ปัจจุบันสะสมอยู่ที่ <strong className="text-yellow-300 font-black text-sm">{formatHours(summary.totalOtHours)} ชั่วโมง</strong> (ส่วนเกินจาก {thresholdLimit} ชม. คือ <span className="text-yellow-200 font-bold">+{formatHours(summary.totalOtHours - thresholdLimit)} ชม.</span>)
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShow80HourWarningModal(true)}
+                                className="self-end sm:self-auto bg-white text-rose-700 hover:bg-rose-50 font-bold text-xs px-3.5 py-1.5 rounded-xl shadow-sm transition active:scale-95 shrink-0"
+                            >
+                                ดูรายละเอียด
+                            </button>
+                        </div>
+                    )}
+
+                    {}
+                    <section className="mb-4 sm:mb-6 no-print">
+                        <div className="flex items-center justify-between mb-2 sm:mb-3">
+                            <h2 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-1.5">
+                                📊 สรุปยอด OT ประจำรอบเดือน
+                            </h2>
+                            <span className="text-[11px] sm:text-xs text-slate-500 bg-white px-2.5 py-0.5 rounded-full border border-slate-200 shadow-sm">
+                                เรท: <strong className="text-indigo-600">{formatMoney(hourlyRate)}</strong> ฿/ชม.
+                            </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
+                            {/* OT 1.0x */}
+                            <div className="bg-white p-2.5 sm:p-3.5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-slate-400"></div>
+                                <div className="text-[10px] sm:text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-0.5">OT 1.0× (เสาร์-อาทิตย์)</div>
+                                <div className="text-base sm:text-lg font-extrabold text-slate-800">{formatHours(summary.hrs1_0)} <span className="text-xs font-normal text-slate-500">ชม.</span></div>
+                                <div className="text-xs font-bold text-slate-600 mt-0.5">{formatMoney(summary.pay1_0)} <span className="text-[10px] text-slate-400">บาท</span></div>
+                            </div>
+
+                            {/* OT 1.5x */}
+                            <div className="bg-white p-2.5 sm:p-3.5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-blue-500"></div>
+                                <div className="text-[10px] sm:text-[11px] font-semibold text-blue-600 uppercase tracking-wider mb-0.5">OT 1.5× (&gt;{settings.baseDailyHours} ชม. จ-ศ)</div>
+                                <div className="text-base sm:text-lg font-extrabold text-slate-800">{formatHours(summary.hrs1_5)} <span className="text-xs font-normal text-slate-500">ชม.</span></div>
+                                <div className="text-xs font-bold text-blue-700 mt-0.5">{formatMoney(summary.pay1_5)} <span className="text-[10px] text-slate-400">บาท</span></div>
+                            </div>
+
+                            {/* OT 2.0x */}
+                            <div className="bg-white p-2.5 sm:p-3.5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-amber-500"></div>
+                                <div className="text-[10px] sm:text-[11px] font-semibold text-amber-700 uppercase tracking-wider mb-0.5">OT 2.0× (นักขัตฤกษ์)</div>
+                                <div className="text-base sm:text-lg font-extrabold text-slate-800">{formatHours(summary.hrs2_0)} <span className="text-xs font-normal text-slate-500">ชม.</span></div>
+                                <div className="text-xs font-bold text-amber-800 mt-0.5">{formatMoney(summary.pay2_0)} <span className="text-[10px] text-slate-400">บาท</span></div>
+                            </div>
+
+                            {/* OT 3.0x */}
+                            <div className="bg-white p-2.5 sm:p-3.5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-rose-500"></div>
+                                <div className="text-[10px] sm:text-[11px] font-semibold text-rose-600 uppercase tracking-wider mb-0.5">OT 3.0× (&gt;{settings.baseDailyHours} ชม. วันหยุด)</div>
+                                <div className="text-base sm:text-lg font-extrabold text-slate-800">{formatHours(summary.hrs3_0)} <span className="text-xs font-normal text-slate-500">ชม.</span></div>
+                                <div className="text-xs font-bold text-rose-700 mt-0.5">{formatMoney(summary.pay3_0)} <span className="text-[10px] text-slate-400">บาท</span></div>
+                            </div>
+
+                            {/* Total OT Summary Card */}
+                            <div className={`p-2.5 sm:p-3.5 rounded-2xl shadow-md col-span-2 sm:col-span-2 lg:col-span-1 flex flex-col justify-between transition-colors ${
+                                isTotalOtExceeded80 ? 'bg-gradient-to-br from-rose-600 to-orange-600 text-white' : 'bg-indigo-600 text-white'
+                            }`}>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <div className="text-[10px] sm:text-[11px] font-medium text-white/80 uppercase tracking-wider flex items-center gap-1">
+                                            <span>รวมค่า OT ทั้งสิ้น</span>
+                                            {isTotalOtExceeded80 && <span className="bg-yellow-300 text-rose-900 text-[9px] font-black px-1.5 py-0.2 rounded-full">⚠️ เกิน {thresholdLimit}h</span>}
+                                        </div>
+                                        <div className="text-lg sm:text-2xl font-black mt-0.5">{formatMoney(summary.totalOtPay)} <span className="text-xs font-normal text-white/80">บาท</span></div>
+                                    </div>
+                                </div>
+                                <div className="pt-1.5 border-t border-white/20 text-xs text-white/90 flex justify-between">
+                                    <span>รวมชั่วโมง OT:</span>
+                                    <span className={`font-black text-sm ${isTotalOtExceeded80 ? 'text-yellow-300' : 'text-amber-300'}`}>
+                                        {formatHours(summary.totalOtHours)} ชม.
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    {}
+                    <div className="bg-white rounded-2xl p-3 sm:p-4 shadow-sm border border-slate-200 mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3 no-print">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs">
+                            <span className="font-semibold text-slate-600 text-[11px] sm:text-xs">สัญลักษณ์:</span>
+                            <span className="bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-[10px] sm:text-xs text-slate-700">⚪ จ-ศ</span>
+                            <span className="bg-slate-200 border border-slate-300 px-1.5 py-0.5 rounded text-[10px] sm:text-xs text-slate-800 font-medium">⚫ เสาร์</span>
+                            <span className="bg-rose-100 border border-rose-200 px-1.5 py-0.5 rounded text-[10px] sm:text-xs text-rose-800 font-medium">🔴 อาทิตย์</span>
+                            <span className="bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded text-[10px] sm:text-xs text-amber-900 font-medium">🟡 นักขัตฤกษ์</span>
+                            <span className="bg-orange-100 border border-rose-300 text-rose-800 font-bold px-1.5 py-0.5 rounded text-[10px] sm:text-xs">⚠️ OT เกิน {thresholdLimit} ชม.</span>
+                        </div>
+
+                        <div className="flex items-center bg-slate-100 p-1 rounded-xl w-full md:w-auto overflow-x-auto no-scrollbar">
+                            <button
+                                onClick={() => setViewMode('mobile-cards')}
+                                className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap text-center ${
+                                    viewMode === 'mobile-cards' 
+                                    ? 'bg-white text-indigo-700 shadow-sm' 
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                📱 การ์ดรายวัน (มือถือ)
+                            </button>
+                            <button
+                                onClick={() => setViewMode('calendar')}
+                                className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap text-center ${
+                                    viewMode === 'calendar' 
+                                    ? 'bg-white text-indigo-700 shadow-sm' 
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                📅 ปฏิทิน 7 วัน
+                            </button>
+                            <button
+                                onClick={() => setViewMode('table')}
+                                className={`flex-1 md:flex-none px-3 py-1.5 text-xs font-semibold rounded-lg transition whitespace-nowrap text-center ${
+                                    viewMode === 'table' 
+                                    ? 'bg-white text-indigo-700 shadow-sm' 
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                            >
+                                📋 ตาราง
+                            </button>
+                        </div>
+                    </div>
+
+                    {}
+                    {viewMode === 'mobile-cards' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                            {dailyCalculations.map((day) => {
+                                let cardStyle = "bg-white border-slate-200";
+                                let dayTypeBadge = <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{day.dayName}</span>;
+
+                                if (day.dayType === 'holiday') {
+                                    cardStyle = "bg-amber-50/40 border-amber-300";
+                                    dayTypeBadge = <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold truncate max-w-[140px]">{day.holidayName || 'นักขัตฤกษ์'}</span>;
+                                } else if (day.dayType === 'sunday') {
+                                    cardStyle = "bg-rose-50/30 border-rose-200";
+                                    dayTypeBadge = <span className="text-[10px] font-bold text-rose-800 bg-rose-200 px-2 py-0.5 rounded-full">วันอาทิตย์</span>;
+                                } else if (day.dayType === 'saturday') {
+                                    cardStyle = "bg-slate-50 border-slate-300";
+                                    dayTypeBadge = <span className="text-[10px] font-bold text-slate-800 bg-slate-300 px-2 py-0.5 rounded-full">วันเสาร์</span>;
+                                }
+
+                                const hasOt = day.totalOtHours > 0;
+                                const isExceeded80 = day.isExceeding80 && hasOt;
+
+                                if (isExceeded80) {
+                                    cardStyle = "bg-orange-50/80 border-rose-400 ring-2 ring-rose-500 shadow-md";
+                                } else if (hasOt) {
+                                    cardStyle += " ring-2 ring-indigo-500 bg-indigo-50/20";
+                                }
+
+                                return (
+                                    <div 
+                                        key={day.dateStr}
+                                        className={`rounded-2xl border shadow-sm p-3 transition ${cardStyle}`}
+                                    >
+                                        <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200/80">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-xl font-black ${isExceeded80 ? 'text-rose-700' : 'text-slate-800'}`}>
+                                                    {day.dayNum}
+                                                </span>
+                                                <div>
+                                                    <div className="text-xs font-semibold text-slate-700">{MONTH_NAMES_TH[day.dateObj.getMonth()]} {day.dateObj.getFullYear()}</div>
+                                                    <div className="text-[10px] text-slate-400">{day.dateStr}</div>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col items-end gap-1">
+                                                {isExceeded80 ? (
+                                                    <span className="text-[10px] font-black bg-gradient-to-r from-rose-600 to-orange-600 text-white px-2 py-0.5 rounded-full shadow-sm animate-pulse">
+                                                        ⚠️ OT เกิน {thresholdLimit} ชม.
+                                                    </span>
+                                                ) : (
+                                                    dayTypeBadge
+                                                )}
+                                                <button 
+                                                    onClick={() => toggleHolidayDate(day.dateStr)}
+                                                    className="text-[10px] text-indigo-600 underline font-medium no-print"
+                                                >
+                                                    {day.dayType === 'holiday' ? 'ยกเลิกวันหยุด' : '+ วันหยุด'}
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        <div className={`flex items-center justify-between gap-2 mb-2 p-1.5 rounded-xl border ${
+                                            isExceeded80 ? 'bg-orange-100/70 border-rose-300' : 'bg-slate-100 border-slate-200'
+                                        }`}>
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleStepHours(day.dateStr, -0.5)}
+                                                className="w-10 h-10 rounded-lg bg-white border border-slate-300 shadow-sm font-black text-slate-800 active:bg-slate-200 active:scale-95 transition flex items-center justify-center text-lg select-none no-print"
+                                            >
+                                                -
+                                            </button>
+
+                                            <div className="flex-1 text-center">
+                                                <div className="text-[10px] text-slate-500 font-medium">ชั่วโมงทำงานจริง</div>
+                                                <div className="flex items-baseline justify-center gap-1">
+                                                    <input 
+                                                        type="number" 
+                                                        step="0.5"
+                                                        min="0"
+                                                        max="24"
+                                                        value={workHours[day.dateStr] ?? ''}
+                                                        onChange={(e) => handleSetHours(day.dateStr, e.target.value)}
+                                                        placeholder="0"
+                                                        className={`w-12 text-center text-lg font-black bg-transparent outline-none p-0 ${
+                                                            isExceeded80 ? 'text-rose-900 font-black' : 'text-slate-900'
+                                                        }`}
+                                                    />
+                                                    <span className="text-xs font-bold text-slate-500">ชม.</span>
+                                                </div>
+                                            </div>
+
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleStepHours(day.dateStr, 0.5)}
+                                                className={`w-10 h-10 rounded-lg text-white shadow-sm font-black active:scale-95 transition flex items-center justify-center text-lg select-none no-print ${
+                                                    isExceeded80 ? 'bg-rose-600 active:bg-rose-700' : 'bg-indigo-600 active:bg-indigo-700'
+                                                }`}
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+
+                                        {/* Quick Hour Presets */}
+                                        <div className="grid grid-cols-3 gap-1 mb-2 no-print">
+                                            <button 
+                                                onClick={() => handleSetHours(day.dateStr, settings.preset1)}
+                                                className={`py-1 text-xs rounded-lg font-semibold transition border ${
+                                                    day.hrs === settings.preset1 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
+                                                }`}
+                                            >
+                                                {settings.preset1} ชม.
+                                            </button>
+                                            <button 
+                                                onClick={() => handleSetHours(day.dateStr, settings.preset2)}
+                                                className={`py-1 text-xs rounded-lg font-semibold transition border ${
+                                                    day.hrs === settings.preset2 ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200'
+                                                }`}
+                                            >
+                                                {settings.preset2} ชม.
+                                            </button>
+                                            <button 
+                                                onClick={() => handleSetHours(day.dateStr, settings.preset3)}
+                                                className={`py-1 text-xs rounded-lg font-semibold transition border ${
+                                                    day.hrs === settings.preset3 ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200'
+                                                }`}
+                                            >
+                                                {settings.preset3} ชม.
+                                            </button>
+                                        </div>
+
+                                        {hasOt ? (
+                                            <div className={`rounded-xl p-2 flex justify-between items-center shadow-sm text-white ${
+                                                isExceeded80 ? 'bg-gradient-to-r from-rose-600 to-orange-600' : 'bg-indigo-600'
+                                            }`}>
+                                                <div>
+                                                    <div className="text-[10px] text-white/80 font-semibold">
+                                                        {isExceeded80 ? `⚠️ OT สะสมเกิน ${thresholdLimit} ชม.` : '🔥 OT วันนี้'}
+                                                    </div>
+                                                    <div className="text-xs font-bold text-amber-300">+{formatHours(day.totalOtHours)} ชั่วโมง</div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <div className="text-[10px] text-white/80 font-semibold">คิดเป็นเงิน</div>
+                                                    <div className="text-sm font-black text-white">{formatMoney(day.totalOtPay)} ฿</div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <div className="bg-slate-100 text-slate-500 rounded-xl p-2 text-center text-xs border border-slate-200">
+                                                {day.hrs > 0 ? `ทำงาน ${formatHours(day.hrs)} ชม. (ไม่มี OT)` : 'ยังไม่ระบุเวลาทำงาน'}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
+                    {}
+                    {viewMode === 'calendar' && (
+                        <div className="bg-white rounded-2xl p-3 sm:p-5 shadow-sm border border-slate-200 overflow-x-auto">
+                            <div className="min-w-[700px]">
+                                <div className="grid grid-cols-7 gap-1.5 sm:gap-2 mb-3 text-center text-xs sm:text-sm font-bold">
+                                    <div className="py-2 bg-rose-50 text-rose-700 rounded-xl border border-rose-100">อาทิตย์</div>
+                                    <div className="py-2 bg-slate-50 text-slate-700 rounded-xl border border-slate-200">จันทร์</div>
+                                    <div className="py-2 bg-slate-50 text-slate-700 rounded-xl border border-slate-200">อังคาร</div>
+                                    <div className="py-2 bg-slate-50 text-slate-700 rounded-xl border border-slate-200">พุธ</div>
+                                    <div className="py-2 bg-slate-50 text-slate-700 rounded-xl border border-slate-200">พฤหัสบดี</div>
+                                    <div className="py-2 bg-slate-50 text-slate-700 rounded-xl border border-slate-200">ศุกร์</div>
+                                    <div className="py-2 bg-slate-100 text-slate-800 rounded-xl border border-slate-300">เสาร์</div>
+                                </div>
+
+                                <div className="grid grid-cols-7 gap-1.5 sm:gap-2.5">
+                                    {Array.from({ length: dailyCalculations[0]?.dayOfWeek || 0 }).map((_, i) => (
+                                        <div key={`empty-${i}`} className="min-h-[120px] bg-slate-50/40 rounded-xl border border-dashed border-slate-200/60"></div>
+                                    ))}
+
+                                    {dailyCalculations.map((day) => {
+                                        let cardStyle = "bg-white border-slate-200";
+                                        let headerBg = "bg-slate-50 text-slate-700 border-slate-200";
+                                        let badge = null;
+
+                                        if (day.dayType === 'holiday') {
+                                            cardStyle = "bg-amber-50/40 border-amber-300";
+                                            headerBg = "bg-amber-100 text-amber-900 border-amber-300";
+                                            badge = <span className="text-[9px] bg-amber-200 text-amber-900 px-1 py-0.5 rounded font-bold truncate max-w-[80px]" title={day.holidayName}>{day.holidayName || 'นักขัตฤกษ์'}</span>;
+                                        } else if (day.dayType === 'sunday') {
+                                            cardStyle = "bg-rose-50/30 border-rose-200";
+                                            headerBg = "bg-rose-100 text-rose-800 border-rose-200";
+                                        } else if (day.dayType === 'saturday') {
+                                            cardStyle = "bg-slate-50 border-slate-300";
+                                            headerBg = "bg-slate-200 text-slate-800 border-slate-300";
+                                        }
+
+                                        const hasOt = day.totalOtHours > 0;
+                                        const isExceeded80 = day.isExceeding80 && hasOt;
+
+                                        if (isExceeded80) {
+                                            cardStyle = "bg-orange-50/90 border-rose-400 ring-2 ring-rose-500 shadow-md";
+                                            headerBg = "bg-gradient-to-r from-rose-600 to-orange-600 text-white font-black border-rose-500";
+                                            badge = <span className="text-[8px] bg-yellow-300 text-rose-950 px-1 py-0.2 rounded font-black">⚠️ เกิน {thresholdLimit}h</span>;
+                                        } else if (hasOt) {
+                                            cardStyle += " ring-2 ring-indigo-400 bg-indigo-50/20";
+                                        }
+
+                                        return (
+                                            <div 
+                                                key={day.dateStr}
+                                                className={`rounded-2xl border shadow-sm p-1.5 sm:p-2 flex flex-col justify-between transition hover:shadow-md ${cardStyle}`}
+                                            >
+                                                <div>
+                                                    <div className={`flex items-center justify-between p-1.5 -mx-1.5 -mt-1.5 mb-1.5 rounded-t-2xl border-b ${headerBg}`}>
+                                                        <div className="flex items-baseline gap-1">
+                                                            <span className="text-sm font-extrabold">{day.dayNum}</span>
+                                                            <span className="text-[10px] opacity-80">{MONTH_NAMES_TH[day.dateObj.getMonth()]}</span>
+                                                        </div>
+                                                        {badge}
+                                                    </div>
+
+                                                    <div className="text-[9px] text-slate-400 mb-1 flex justify-between items-center no-print">
+                                                        <span>{day.dateStr}</span>
+                                                        <button 
+                                                            onClick={() => toggleHolidayDate(day.dateStr)}
+                                                            className="text-[9px] text-indigo-600 hover:underline font-medium"
+                                                        >
+                                                            {day.dayType === 'holiday' ? 'ยกเลิก' : '+วันหยุด'}
+                                                        </button>
+                                                    </div>
+
+                                                    {hasOt ? (
+                                                        <div className={`mb-1.5 text-white rounded-lg px-1.5 py-0.5 text-center shadow-sm ${
+                                                            isExceeded80 ? 'bg-gradient-to-r from-rose-600 to-orange-600' : 'bg-indigo-600'
+                                                        }`}>
+                                                            <div className="text-[9px] text-white/80">
+                                                                {isExceeded80 ? `⚠️ OT เกิน ${thresholdLimit} ชม.` : 'คำนวณ OT ได้'}
+                                                            </div>
+                                                            <div className="text-xs font-black text-amber-300">
+                                                                🔥 +{formatHours(day.totalOtHours)} ชม.
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="mb-1.5 bg-slate-100 text-slate-500 rounded-lg px-1 py-0.5 text-center text-[9px] border border-slate-200">
+                                                            {day.hrs > 0 ? `${formatHours(day.hrs)} ชม. (ไม่มี OT)` : 'ไม่ระบุเวลา'}
+                                                        </div>
+                                                    )}
+
+                                                    <div className="mb-1.5">
+                                                        <div className={`flex items-center justify-between p-0.5 rounded-lg border transition ${
+                                                            isExceeded80 
+                                                                ? 'bg-rose-100 border-rose-300' 
+                                                                : day.hrs > 0 ? 'bg-indigo-50 border-indigo-300' : 'bg-slate-100 border-slate-200'
+                                                        }`}>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => handleStepHours(day.dateStr, -0.5)}
+                                                                className="w-6 h-6 rounded bg-white border border-slate-300 font-black text-slate-700 active:scale-90 transition flex items-center justify-center text-xs select-none no-print"
+                                                            >
+                                                                -
+                                                            </button>
+                                                            
+                                                            <div className="flex-1 text-center px-0.5">
+                                                                <input 
+                                                                    type="number" 
+                                                                    step="0.5"
+                                                                    min="0"
+                                                                    max="24"
+                                                                    value={workHours[day.dateStr] ?? ''}
+                                                                    onChange={(e) => handleSetHours(day.dateStr, e.target.value)}
+                                                                    placeholder="0"
+                                                                    className={`w-8 text-center text-xs font-black bg-transparent outline-none p-0 ${
+                                                                        isExceeded80 ? 'text-rose-900 font-black' : 'text-slate-900'
+                                                                    }`}
+                                                                />
+                                                            </div>
+
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => handleStepHours(day.dateStr, 0.5)}
+                                                                className={`w-6 h-6 rounded text-white font-black active:scale-90 transition flex items-center justify-center text-xs select-none no-print ${
+                                                                    isExceeded80 ? 'bg-rose-600' : 'bg-indigo-600'
+                                                                }`}
+                                                            >
+                                                                +
+                                                            </button>
+                                                        </div>
+
+                                                        <div className="grid grid-cols-3 gap-0.5 mt-1 no-print">
+                                                            <button 
+                                                                onClick={() => handleSetHours(day.dateStr, settings.preset1)}
+                                                                className={`py-0.5 text-[9px] rounded font-semibold border ${
+                                                                    day.hrs === settings.preset1 ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200'
+                                                                }`}
+                                                            >
+                                                                {settings.preset1}
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => handleSetHours(day.dateStr, settings.preset2)}
+                                                                className={`py-0.5 text-[9px] rounded font-semibold border ${
+                                                                    day.hrs === settings.preset2 ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-slate-600 border-slate-200'
+                                                                }`}
+                                                            >
+                                                                {settings.preset2}
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => handleSetHours(day.dateStr, settings.preset3)}
+                                                                className={`py-0.5 text-[9px] rounded font-semibold border ${
+                                                                    day.hrs === settings.preset3 ? 'bg-rose-600 text-white border-rose-600' : 'bg-white text-slate-600 border-slate-200'
+                                                                }`}
+                                                            >
+                                                                {settings.preset3}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="border-t border-slate-200 pt-1 text-[10px] bg-white/80 p-1 rounded-lg">
+                                                    <div className="flex justify-between items-center font-bold text-indigo-900">
+                                                        <span>ยอด OT:</span>
+                                                        <span className={`font-black ${isExceeded80 ? 'text-rose-700' : 'text-indigo-700'}`}>
+                                                            {formatMoney(day.totalOtPay)} ฿
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {viewMode === 'table' && (
+                        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-x-auto">
+                            <table className="w-full text-left text-xs sm:text-sm text-slate-700 min-w-[650px]">
+                                <thead className="bg-slate-50 text-[11px] font-bold text-slate-600 uppercase border-b border-slate-200">
+                                    <tr>
+                                        <th className="px-3 py-2.5">วันที่</th>
+                                        <th className="px-3 py-2.5">วัน</th>
+                                        <th className="px-3 py-2.5">ประเภท</th>
+                                        <th className="px-3 py-2.5 text-center min-w-[120px]">ชั่วโมงจริง</th>
+                                        <th className="px-3 py-2.5 text-right">OT 1.0×</th>
+                                        <th className="px-3 py-2.5 text-right">OT 1.5×</th>
+                                        <th className="px-3 py-2.5 text-right">OT 2.0×</th>
+                                        <th className="px-3 py-2.5 text-right">OT 3.0×</th>
+                                        <th className="px-3 py-2.5 text-right font-extrabold text-indigo-700">เงิน OT (บาท)</th>
+                                        <th className="px-3 py-2.5 text-center">สะสม OT</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-200">
+                                    {dailyCalculations.map((day) => {
+                                        const isExceeded80 = day.isExceeding80 && day.totalOtHours > 0;
+
+                                        let typeBg = "bg-white";
+                                        let typeLabel = "⚪ จันทร์-ศุกร์";
+                                        if (isExceeded80) {
+                                            typeBg = "bg-orange-100/60 font-semibold";
+                                        } else if (day.dayType === 'holiday') {
+                                            typeBg = "bg-amber-50/50";
+                                            typeLabel = `🟡 นักขัตฤกษ์ (${day.holidayName || 'วันหยุด'})`;
+                                        } else if (day.dayType === 'sunday') {
+                                            typeBg = "bg-rose-50/40";
+                                            typeLabel = "🔴 อาทิตย์";
+                                        } else if (day.dayType === 'saturday') {
+                                            typeBg = "bg-slate-100/60";
+                                            typeLabel = "⚫ เสาร์";
+                                        }
+
+                                        return (
+                                            <tr key={day.dateStr} className={`hover:bg-slate-50 transition ${typeBg}`}>
+                                                <td className="px-3 py-2 font-medium flex items-center gap-1">
+                                                    {day.dateStr}
+                                                    {isExceeded80 && <span className="text-[10px] bg-rose-600 text-white px-1.5 py-0.2 rounded font-bold">⚠️ &gt;{thresholdLimit}h</span>}
+                                                </td>
+                                                <td className="px-3 py-2">{day.dayName}</td>
+                                                <td className="px-3 py-2 text-[11px] font-medium">{typeLabel}</td>
+                                                <td className="px-3 py-2 text-center">
+                                                    <div className={`inline-flex items-center gap-1 p-0.5 rounded-lg border ${
+                                                        isExceeded80 ? 'bg-rose-100 border-rose-300' : 'bg-slate-100 border-slate-300'
+                                                    }`}>
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleStepHours(day.dateStr, -0.5)}
+                                                            className="w-5 h-5 rounded bg-white border border-slate-300 font-bold text-slate-700 active:scale-95 transition flex items-center justify-center text-xs no-print"
+                                                        >
+                                                            -
+                                                        </button>
+                                                        <input 
+                                                            type="number" 
+                                                            step="0.5"
+                                                            min="0"
+                                                            max="24"
+                                                            value={workHours[day.dateStr] ?? ''}
+                                                            onChange={(e) => handleSetHours(day.dateStr, e.target.value)}
+                                                            className="w-10 text-center font-bold text-xs bg-transparent outline-none p-0"
+                                                        />
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => handleStepHours(day.dateStr, 0.5)}
+                                                            className={`w-5 h-5 rounded text-white font-bold active:scale-95 transition flex items-center justify-center text-xs no-print ${
+                                                                isExceeded80 ? 'bg-rose-600' : 'bg-indigo-600'
+                                                            }`}
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                                <td className="px-3 py-2 text-right font-mono">{day.ot1_0 > 0 ? formatHours(day.ot1_0) : '-'}</td>
+                                                <td className="px-3 py-2 text-right font-mono text-blue-600 font-semibold">{day.ot1_5 > 0 ? formatHours(day.ot1_5) : '-'}</td>
+                                                <td className="px-3 py-2 text-right font-mono text-amber-600 font-semibold">{day.ot2_0 > 0 ? formatHours(day.ot2_0) : '-'}</td>
+                                                <td className="px-3 py-2 text-right font-mono text-rose-600 font-semibold">{day.ot3_0 > 0 ? formatHours(day.ot3_0) : '-'}</td>
+                                                <td className="px-3 py-2 text-right font-bold text-indigo-700 font-mono">
+                                                    {day.totalOtPay > 0 ? formatMoney(day.totalOtPay) : '0.00'}
+                                                </td>
+                                                <td className="px-3 py-2 text-center font-mono font-bold">
+                                                    <span className={`px-2 py-0.5 rounded-md text-xs ${
+                                                        settings.enableOtWarning && day.runningCumulativeOt > thresholdLimit 
+                                                            ? 'bg-rose-600 text-white font-black' 
+                                                            : 'bg-slate-100 text-slate-700'
+                                                    }`}>
+                                                        {formatHours(day.runningCumulativeOt)}h
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                                <tfoot className="bg-indigo-50/80 font-bold border-t-2 border-indigo-200">
+                                    <tr>
+                                        <td colSpan="4" className="px-3 py-2.5 text-right">รวมทั้งสิ้นประจำรอบเดือน:</td>
+                                        <td className="px-3 py-2.5 text-right font-mono">{formatHours(summary.hrs1_0)}</td>
+                                        <td className="px-3 py-2.5 text-right font-mono text-blue-700">{formatHours(summary.hrs1_5)}</td>
+                                        <td className="px-3 py-2.5 text-right font-mono text-amber-700">{formatHours(summary.hrs2_0)}</td>
+                                        <td className="px-3 py-2.5 text-right font-mono text-rose-700">{formatHours(summary.hrs3_0)}</td>
+                                        <td className="px-3 py-2.5 text-right text-sm sm:text-base text-indigo-900 font-black font-mono">
+                                            {formatMoney(summary.totalOtPay)} บาท
+                                        </td>
+                                        <td className="px-3 py-2.5 text-center font-black font-mono text-rose-700">
+                                            {formatHours(summary.totalOtHours)} ชม.
+                                        </td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    )}
+
+                    {}
+                    {showSettingsModal && (
+                        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 z-50 animate-fade-in no-print">
+                            <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-100">
+                                <div className="p-4 bg-indigo-600 text-white flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xl">⚙️</span>
+                                        <h3 className="text-base font-bold">ตั้งค่าสูตรและระบบคำนวณ OT</h3>
+                                    </div>
+                                    <button 
+                                        onClick={() => setShowSettingsModal(false)}
+                                        className="text-white/80 hover:text-white font-bold text-xl px-2"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+
+                                <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs sm:text-sm">
+                                    {/* Work Hours Base */}
+                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                                        <label className="block font-bold text-slate-800 mb-1">
+                                            ⏰ ชั่วโมงทำงานปกติประจำวัน (ฐานคำนวณ OT)
+                                        </label>
+                                        <p className="text-xs text-slate-500 mb-2">จันทร์-ศุกร์ เกินจากชั่วโมงนี้จะคิดเป็น OT 1.5x</p>
+                                        <div className="flex gap-2">
+                                            {[8, 9].map(num => (
+                                                <button
+                                                    key={num}
+                                                    type="button"
+                                                    onClick={() => setSettings(prev => ({ ...prev, baseDailyHours: num }))}
+                                                    className={`flex-1 py-1.5 rounded-xl border font-bold text-xs transition ${
+                                                        parseFloat(settings.baseDailyHours) === num 
+                                                            ? 'bg-indigo-600 text-white border-indigo-600' 
+                                                            : 'bg-white text-slate-700 border-slate-300'
+                                                    }`}
+                                                >
+                                                    {num} ชั่วโมง/วัน
+                                                </button>
+                                            ))}
+                                            <input 
+                                                type="number"
+                                                step="0.5"
+                                                value={settings.baseDailyHours}
+                                                onChange={(e) => setSettings(prev => ({ ...prev, baseDailyHours: parseFloat(e.target.value) || 0 }))}
+                                                className="w-20 text-center font-bold border border-slate-300 rounded-xl bg-white px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="อื่น..."
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Monthly Days Divisor */}
+                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                                        <label className="block font-bold text-slate-800 mb-1">
+                                            📆 จำนวนวันหารต่อเดือน (สูตรหาเรทรายชั่วโมง)
+                                        </label>
+                                        <p className="text-xs text-slate-500 mb-2">สูตร: เงินเดือน ÷ จำนวนวัน ÷ ชั่วโมงปกติ</p>
+                                        <div className="flex gap-2">
+                                            {[30, 26, 22].map(days => (
+                                                <button
+                                                    key={days}
+                                                    type="button"
+                                                    onClick={() => setSettings(prev => ({ ...prev, daysInMonth: days }))}
+                                                    className={`flex-1 py-1.5 rounded-xl border font-bold text-xs transition ${
+                                                        parseInt(settings.daysInMonth) === days 
+                                                            ? 'bg-indigo-600 text-white border-indigo-600' 
+                                                            : 'bg-white text-slate-700 border-slate-300'
+                                                    }`}
+                                                >
+                                                    {days} วัน
+                                                </button>
+                                            ))}
+                                            <input 
+                                                type="number"
+                                                value={settings.daysInMonth}
+                                                onChange={(e) => setSettings(prev => ({ ...prev, daysInMonth: parseInt(e.target.value) || 0 }))}
+                                                className="w-20 text-center font-bold border border-slate-300 rounded-xl bg-white px-2 py-1 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                placeholder="อื่น..."
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Cutoff Days Cycle */}
+                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                                        <label className="block font-bold text-slate-800 mb-1">
+                                            🗓️ วันตัดวิกรอบเดือน OT
+                                        </label>
+                                        <div className="grid grid-cols-2 gap-2 mt-2">
+                                            <div>
+                                                <span className="text-xs text-slate-500 block mb-1">วันเริ่มรอบ (เดือนก่อน)</span>
+                                                <input 
+                                                    type="number"
+                                                    min="1"
+                                                    max="31"
+                                                    value={settings.cycleStartDay}
+                                                    onChange={(e) => setSettings(prev => ({ ...prev, cycleStartDay: parseInt(e.target.value) || 1 }))}
+                                                    className="w-full text-center font-bold border border-slate-300 rounded-xl bg-white py-1.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                            <div>
+                                                <span className="text-xs text-slate-500 block mb-1">วันสิ้นสุดรอบ (เดือนนี้)</span>
+                                                <input 
+                                                    type="number"
+                                                    min="1"
+                                                    max="31"
+                                                    value={settings.cycleEndDay}
+                                                    onChange={(e) => setSettings(prev => ({ ...prev, cycleEndDay: parseInt(e.target.value) || 31 }))}
+                                                    className="w-full text-center font-bold border border-slate-300 rounded-xl bg-white py-1.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* OT Warning Limit */}
+                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="font-bold text-slate-800">
+                                                ⚠️ เกณฑ์แจ้งเตือน OT สะสมเกินกำหนด
+                                            </label>
+                                            <input 
+                                                type="checkbox"
+                                                checked={settings.enableOtWarning}
+                                                onChange={(e) => setSettings(prev => ({ ...prev, enableOtWarning: e.target.checked }))}
+                                                className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                                            />
+                                        </div>
+                                        <p className="text-xs text-slate-500 mb-2">แสดงการ์ดสีส้ม-แดงและป็อปอัพเตือนเมื่อสะสมเกินกำหนด</p>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="number"
+                                                disabled={!settings.enableOtWarning}
+                                                value={settings.otWarningThreshold}
+                                                onChange={(e) => setSettings(prev => ({ ...prev, otWarningThreshold: parseFloat(e.target.value) || 0 }))}
+                                                className="flex-1 text-center font-extrabold text-rose-700 border border-slate-300 rounded-xl bg-white py-1.5 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                                            />
+                                            <span className="font-bold text-slate-600">ชั่วโมง</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Quick Preset Buttons Settings */}
+                                    <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                                        <label className="block font-bold text-slate-800 mb-1">
+                                            ⚡ ปรับแต่งปุ่มเลือกชั่วโมงด่วน 3 ปุ่ม
+                                        </label>
+                                        <div className="grid grid-cols-3 gap-2 mt-2">
+                                            <div>
+                                                <span className="text-[10px] text-slate-500 block mb-1">ปุ่มที่ 1</span>
+                                                <input 
+                                                    type="number"
+                                                    step="0.5"
+                                                    value={settings.preset1}
+                                                    onChange={(e) => setSettings(prev => ({ ...prev, preset1: parseFloat(e.target.value) || 0 }))}
+                                                    className="w-full text-center font-bold border border-slate-300 rounded-xl bg-white py-1 outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] text-slate-500 block mb-1">ปุ่มที่ 2</span>
+                                                <input 
+                                                    type="number"
+                                                    step="0.5"
+                                                    value={settings.preset2}
+                                                    onChange={(e) => setSettings(prev => ({ ...prev, preset2: parseFloat(e.target.value) || 0 }))}
+                                                    className="w-full text-center font-bold border border-slate-300 rounded-xl bg-white py-1 outline-none"
+                                                />
+                                            </div>
+                                            <div>
+                                                <span className="text-[10px] text-slate-500 block mb-1">ปุ่มที่ 3</span>
+                                                <input 
+                                                    type="number"
+                                                    step="0.5"
+                                                    value={settings.preset3}
+                                                    onChange={(e) => setSettings(prev => ({ ...prev, preset3: parseFloat(e.target.value) || 0 }))}
+                                                    className="w-full text-center font-bold border border-slate-300 rounded-xl bg-white py-1 outline-none"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="p-3 bg-slate-100 border-t border-slate-200 text-right flex justify-between items-center">
+                                    <button 
+                                        onClick={() => setSettings(DEFAULT_SETTINGS)}
+                                        className="text-xs font-semibold text-rose-600 hover:underline px-2"
+                                    >
+                                        รีเซ็ตเป็นค่าเริ่มต้น
+                                    </button>
+                                    <button 
+                                        onClick={() => setShowSettingsModal(false)}
+                                        className="px-5 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl hover:bg-indigo-700 transition active:scale-95"
+                                    >
+                                        บันทึกการตั้งค่า
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {show80HourWarningModal && (
+                        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center p-3 z-50 animate-fade-in no-print">
+                            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border-2 border-rose-500 pulse-warning">
+                                <div className="p-5 bg-gradient-to-r from-rose-600 to-orange-500 text-white text-center relative">
+                                    <button 
+                                        onClick={() => setShow80HourWarningModal(false)}
+                                        className="absolute top-3 right-3 text-white/80 hover:text-white font-bold text-xl px-2"
+                                    >
+                                        ✕
+                                    </button>
+                                    <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center text-3xl mx-auto mb-2 shadow-inner">
+                                        ⚠️
+                                    </div>
+                                    <h3 className="text-lg font-black tracking-wide">แจ้งเตือน: OT เกิน {thresholdLimit} ชั่วโมง!</h3>
+                                    <p className="text-xs text-rose-100 mt-1">ยอดชั่วโมง OT สะสมประจำรอบเดือนนี้เกินเกณฑ์ {thresholdLimit} ชั่วโมงแล้ว</p>
+                                </div>
+                                
+                                <div className="p-5 space-y-3 text-center">
+                                    <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4">
+                                        <div className="text-xs text-rose-600 font-semibold mb-1">ยอด OT รวมสะสมขณะนี้</div>
+                                        <div className="text-3xl font-black text-rose-700 font-mono">
+                                            {formatHours(summary.totalOtHours)} <span className="text-sm font-normal text-slate-600">ชั่วโมง</span>
+                                        </div>
+                                        <div className="text-xs font-bold text-orange-600 mt-1">
+                                            (เกินเกณฑ์กำหนด {thresholdLimit} ชม. อยู่ +{formatHours(summary.totalOtHours - thresholdLimit)} ชม.)
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="p-4 bg-slate-50 border-t border-slate-200 text-center">
+                                    <button 
+                                        onClick={() => setShow80HourWarningModal(false)}
+                                        className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-orange-600 hover:from-rose-700 hover:to-orange-700 text-white font-bold text-sm rounded-xl shadow-md transition active:scale-95"
+                                    >
+                                        รับทราบและดำเนินการต่อ
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {showHolidayModal && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 z-50 no-print">
+                            <div className="bg-white rounded-2xl shadow-xl max-w-xl w-full max-h-[85vh] flex flex-col overflow-hidden">
+                                <div className="p-4 bg-amber-50 border-b border-amber-200 flex justify-between items-center">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">🟡</span>
+                                        <h3 className="text-sm sm:text-base font-bold text-amber-900">จัดการวันหยุดนักขัตฤกษ์ ({selectedYear})</h3>
+                                    </div>
+                                    <button 
+                                        onClick={() => setShowHolidayModal(false)}
+                                        className="text-slate-400 hover:text-slate-600 font-bold text-lg px-2"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
+                                
+                                <div className="p-4 overflow-y-auto space-y-2">
+                                    <p className="text-xs text-slate-500 mb-2">
+                                        รายการวันหยุดในระบบ คุณสามารถคลิกตั้งค่าวันหยุดเพิ่มเติมได้โดยตรงบนการ์ดปฏิทินของแต่ละปี
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                        {Object.entries(customHolidays).filter(([dateStr]) => dateStr.startsWith(selectedYear.toString())).map(([dateStr, name]) => (
+                                            <div key={dateStr} className="flex justify-between items-center bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
+                                                <div>
+                                                    <span className="font-bold text-slate-800 mr-2">{dateStr}</span>
+                                                    <span className="text-amber-800 font-medium">{name}</span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <div className="p-3 bg-slate-50 border-t border-slate-200 text-right">
+                                    <button 
+                                        onClick={() => setShowHolidayModal(false)}
+                                        className="px-4 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-xl hover:bg-indigo-700 transition"
+                                    >
+                                        ปิดหน้าต่าง
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    {showPrintSlipModal && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 z-50 overflow-y-auto">
+                            <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full my-auto flex flex-col overflow-hidden">
+                                <div className="p-4 bg-slate-800 text-white flex justify-between items-center no-print">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xl">🖨️</span>
+                                        <h3 className="text-base font-bold">สรุปสลับสลิป OT ประจำรอบเดือน (พร้อมพิมพ์)</h3>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button 
+                                            onClick={() => window.print()}
+                                            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow transition"
+                                        >
+                                            🖨️ พิมพ์เอกสาร
+                                        </button>
+                                        <button 
+                                            onClick={() => setShowPrintSlipModal(false)}
+                                            className="text-white/80 hover:text-white font-bold text-xl px-2"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div 
+                                    id="ot-print-slip" 
+                                    className="p-6 sm:p-8 space-y-6 text-slate-800 bg-white"
+                                >
+                                    {/* Statement Header */}
+                                    <div className="border-b pb-4 flex justify-between items-start">
+                                        <div>
+                                            <h2 className="text-xl font-bold text-slate-900">เอกสารสรุปชั่วโมงการทำงานและการคำนวณ OT</h2>
+                                            <p className="text-xs text-slate-500 mt-1">ประจำรอบเดือน {MONTH_NAMES_TH[selectedCycleMonth-1]} {selectedYear}</p>
+                                        </div>
+                                        <div className="text-right text-xs">
+                                            <p className="font-bold text-slate-700">วันที่ออกเอกสาร: {new Date().toLocaleDateString('th-TH')}</p>
+                                            <p className="text-slate-500">เงินเดือนพื้นฐาน: {salary.toLocaleString()} บาท</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Breakdown Table */}
+                                    <table className="w-full text-xs text-left border-collapse">
+                                        <thead>
+                                            <tr className="bg-slate-100 border-y border-slate-300 font-bold">
+                                                <th className="py-2 px-2">รายการ OT</th>
+                                                <th className="py-2 px-2 text-center">อัตราคูณ</th>
+                                                <th className="py-2 px-2 text-right">จำนวนชั่วโมง</th>
+                                                <th className="py-2 px-2 text-right">อัตรา (บาท/ชม.)</th>
+                                                <th className="py-2 px-2 text-right">รวมเป็นเงิน (บาท)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-200">
+                                            <tr>
+                                                <td className="py-2 px-2 font-medium">OT 1.0x (ทำงานวันหยุดปกติ)</td>
+                                                <td className="py-2 px-2 text-center font-mono">1.0×</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatHours(summary.hrs1_0)} ชม.</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatMoney(hourlyRate * 1.0)}</td>
+                                                <td className="py-2 px-2 text-right font-mono font-bold">{formatMoney(summary.pay1_0)}</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="py-2 px-2 font-medium">OT 1.5x (ล่วงเวลาวันทำงานปกติ)</td>
+                                                <td className="py-2 px-2 text-center font-mono">1.5×</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatHours(summary.hrs1_5)} ชม.</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatMoney(hourlyRate * 1.5)}</td>
+                                                <td className="py-2 px-2 text-right font-mono font-bold">{formatMoney(summary.pay1_5)}</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="py-2 px-2 font-medium">OT 2.0x (ทำงานวันหยุดนักขัตฤกษ์)</td>
+                                                <td className="py-2 px-2 text-center font-mono">2.0×</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatHours(summary.hrs2_0)} ชม.</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatMoney(hourlyRate * 2.0)}</td>
+                                                <td className="py-2 px-2 text-right font-mono font-bold">{formatMoney(summary.pay2_0)}</td>
+                                            </tr>
+                                            <tr>
+                                                <td className="py-2 px-2 font-medium">OT 3.0x (ล่วงเวลาวันหยุด)</td>
+                                                <td className="py-2 px-2 text-center font-mono">3.0×</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatHours(summary.hrs3_0)} ชม.</td>
+                                                <td className="py-2 px-2 text-right font-mono">{formatMoney(hourlyRate * 3.0)}</td>
+                                                <td className="py-2 px-2 text-right font-mono font-bold">{formatMoney(summary.pay3_0)}</td>
+                                            </tr>
+                                        </tbody>
+                                        <tfoot>
+                                            <tr className="bg-slate-100 border-t-2 border-slate-400 font-bold text-sm">
+                                                <td colSpan="2" className="py-3 px-2 text-slate-900">รวมค่า OT ทั้งสิ้นประจำรอบเดือน:</td>
+                                                <td className="py-3 px-2 text-right font-mono text-indigo-700">{formatHours(summary.totalOtHours)} ชม.</td>
+                                                <td colSpan="2" className="py-3 px-2 text-right font-mono text-indigo-900 font-black text-base">
+                                                    {formatMoney(summary.totalOtPay)} บาท
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {}
+                    <footer className="mt-6 text-center text-xs text-slate-400 no-print border-t border-slate-200 pt-3">
+                        <p>ปฏิทินคำนวณ OT ปี {selectedYear} • ฐานทำงานปกติ {settings.baseDailyHours} ชม./วัน • หาร {settings.daysInMonth} วัน/เดือน • บันทึกอัตโนมัติ</p>
+                    </footer>
+                </div>
+            );
+        }
+
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<OTCalculatorApp />);
+    </script>
+</body>
+</html>
